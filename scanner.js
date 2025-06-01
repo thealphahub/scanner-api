@@ -5,9 +5,10 @@ const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY || '27496bcd-2a62-4e7a-b8f5-0ae44a7d0445';
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+const SOLSCAN_API_KEY = process.env.SOLSCAN_API_KEY;
+const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
 
-// Permet l’accès depuis ton site (front)
 app.use(cors());
 
 async function getTokenMetadata(mint) {
@@ -62,7 +63,7 @@ function extractSocials(metadata) {
   return socials;
 }
 
-// -------- AJOUTE CETTE FONCTION --------
+// --- Utilitaire pour lire champs multiples
 function getField(obj, paths) {
   for (let path of paths) {
     const value = path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : null), obj);
@@ -71,7 +72,23 @@ function getField(obj, paths) {
   return null;
 }
 
-// -------- NOUVEAU BLOC POUR /scan --------
+// --- Birdeye: top holders
+async function getTopHoldersBirdeye(mint) {
+  try {
+    const url = `https://public-api.birdeye.so/v1/token/holder_list?address=${mint}&limit=10`;
+    const { data } = await axios.get(url, {
+      headers: {
+        "X-API-KEY": BIRDEYE_API_KEY
+      }
+    });
+    return data?.data || null; // data.data contient la liste des holders
+  } catch (e) {
+    console.log('Birdeye error:', e.response?.status, e.response?.data);
+    return null;
+  }
+}
+
+// ROUTE PRINCIPALE
 app.get('/scan', async (req, res) => {
   const mint = req.query.mint;
   if (!mint) return res.status(400).json({ error: "Missing token mint address" });
@@ -86,7 +103,7 @@ app.get('/scan', async (req, res) => {
     const isHoneypot = await checkHoneypot(mint);
     const socials = extractSocials(metadata);
 
-    // Cherche dans toutes les sources possibles !
+    // Multi-sources pour name, symbol, logo
     const name = getField(metadata, [
       'name',
       'offChainData.name',
@@ -106,6 +123,9 @@ app.get('/scan', async (req, res) => {
       'offChainData.metadata.logo'
     ]);
 
+    // Birdeye holders
+    const topHolders = await getTopHoldersBirdeye(mint);
+
     res.json({
       name: name || null,
       symbol: symbol || null,
@@ -113,7 +133,8 @@ app.get('/scan', async (req, res) => {
       creator: creator || null,
       tokensCreated: tokensCreated.length,
       isHoneypot,
-      socials
+      socials,
+      topHolders // tableau des top holders (adresse, balance, etc.)
     });
   } catch (e) {
     res.status(500).json({ error: "Server error", details: e.message });
