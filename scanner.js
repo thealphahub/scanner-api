@@ -11,6 +11,7 @@ const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
 
 app.use(cors());
 
+// --- Fonctions déjà existantes, inchangées ---
 async function getTokenMetadata(mint) {
   const url = `https://api.helius.xyz/v0/tokens/metadata?api-key=${HELIUS_API_KEY}`;
   const { data } = await axios.post(url, { mintAccounts: [mint] });
@@ -71,6 +72,7 @@ function getField(obj, paths) {
   return null;
 }
 
+// --- Birdeye: top holders
 async function getTopHoldersBirdeye(mint) {
   if (!BIRDEYE_API_KEY) return null;
   try {
@@ -87,58 +89,76 @@ async function getTopHoldersBirdeye(mint) {
   }
 }
 
-// ROUTE PRINCIPALE
+// --- SOLSCAN: top holders
+async function getTopHoldersSolscan(mint) {
+  if (!SOLSCAN_API_KEY) return null;
+  try {
+    const url = `https://api.solscan.io/v2.0/token/holders`;
+    const { data } = await axios.post(
+      url,
+      {
+        tokenAddress: mint,
+        offset: 0,
+        limit: 10
+      },
+      {
+        headers: {
+          'accept': 'application/json',
+          'Authorization': `Bearer ${SOLSCAN_API_KEY}`
+        }
+      }
+    );
+    return data?.data || null;
+  } catch (e) {
+    console.log('Solscan error:', e.response?.status, e.response?.data);
+    return null;
+  }
+}
+
+// ROUTE PRINCIPALE AVEC FAIL-SAFE POUR TOUTES LES API
 app.get('/scan', async (req, res) => {
   const mint = req.query.mint;
   if (!mint) return res.status(400).json({ error: "Missing token mint address" });
 
-  try {
-    const metadata = await getTokenMetadata(mint);
-    console.log(metadata); // Pour debug, retire-le si tout fonctionne !
+  let metadata = null, creator = null, tokensCreated = [], isHoneypot = null, socials = {}, topHolders = null, solscanHolders = null;
 
-    if (!metadata) return res.status(404).json({ error: "Token not found" });
+  // Helius (metadata)
+  try { metadata = await getTokenMetadata(mint); } catch (e) { console.log('Helius error:', e.message); }
+  // Helius (creator & tokens créés)
+  try { creator = await getCreatorWallet(mint); if (creator) tokensCreated = await getTokensCreatedBy(creator); } catch (e) { console.log('Creator error:', e.message); }
+  // Honeypot
+  try { isHoneypot = await checkHoneypot(mint); } catch (e) { console.log('Honeypot error:', e.message); }
+  // Socials
+  try { socials = metadata ? extractSocials(metadata) : {}; } catch (e) { console.log('Socials error:', e.message); }
+  // Birdeye
+  try { topHolders = await getTopHoldersBirdeye(mint); } catch (e) { topHolders = null; }
+  // Solscan
+  try { solscanHolders = await getTopHoldersSolscan(mint); } catch (e) { solscanHolders = null; }
 
-    const creator = await getCreatorWallet(mint);
-    let tokensCreated = [];
-    if (creator) tokensCreated = await getTokensCreatedBy(creator);
-    const isHoneypot = await checkHoneypot(mint);
-    const socials = extractSocials(metadata);
+  // Champs utilitaires
+  const name = metadata ? getField(metadata, [
+    'name', 'offChainData.name', 'offChainData.metadata.name', 'onChainData.metadata.name'
+  ]) : null;
+  const symbol = metadata ? getField(metadata, [
+    'symbol', 'offChainData.symbol', 'offChainData.metadata.symbol', 'onChainData.metadata.symbol'
+  ]) : null;
+  const logo = metadata ? getField(metadata, [
+    'offChainData.image', 'offChainData.logo', 'offChainData.metadata.image', 'offChainData.metadata.logo'
+  ]) : null;
 
-    // Fallback multi-sources
-    const name = getField(metadata, [
-      'name',
-      'offChainData.name',
-      'offChainData.metadata.name',
-      'onChainData.metadata.name'
-    ]) ?? "-";
-    const symbol = getField(metadata, [
-      'symbol',
-      'offChainData.symbol',
-      'offChainData.metadata.symbol',
-      'onChainData.metadata.symbol'
-    ]) ?? "-";
-    const logo = getField(metadata, [
-      'offChainData.image',
-      'offChainData.logo',
-      'offChainData.metadata.image',
-      'offChainData.metadata.logo'
-    ]) || null;
+  if (!metadata) return res.status(404).json({ error: "Token not found" });
 
-    const topHolders = await getTopHoldersBirdeye(mint);
-
-    res.json({
-      name,
-      symbol,
-      logo,
-      creator: creator || null,
-      tokensCreated: Array.isArray(tokensCreated) ? tokensCreated.length : 0,
-      isHoneypot,
-      socials,
-      topHolders
-    });
-  } catch (e) {
-    res.status(500).json({ error: "Server error", details: e.message });
-  }
+  res.json({
+    name: name || null,
+    symbol: symbol || null,
+    logo: logo || null,
+    creator: creator || null,
+    tokensCreated: Array.isArray(tokensCreated) ? tokensCreated.length : 0,
+    isHoneypot,
+    socials,
+    birdeyeTopHolders: topHolders,
+    solscanTopHolders: solscanHolders
+  });
 });
 
 app.listen(PORT, () => {
