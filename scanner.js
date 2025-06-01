@@ -11,7 +11,7 @@ const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
 
 app.use(cors());
 
-// --- Fonctions déjà existantes, inchangées ---
+// --- Fonctions API ---
 async function getTokenMetadata(mint) {
   const url = `https://api.helius.xyz/v0/tokens/metadata?api-key=${HELIUS_API_KEY}`;
   const { data } = await axios.post(url, { mintAccounts: [mint] });
@@ -89,7 +89,7 @@ async function getTopHoldersBirdeye(mint) {
   }
 }
 
-// --- SOLSCAN: top holders
+// --- Solscan: top holders
 async function getTopHoldersSolscan(mint) {
   if (!SOLSCAN_API_KEY) return null;
   try {
@@ -115,27 +115,21 @@ async function getTopHoldersSolscan(mint) {
   }
 }
 
-// ROUTE PRINCIPALE AVEC FAIL-SAFE POUR TOUTES LES API
+// ----------- ROUTE PRINCIPALE AVEC FAIL-SAFE POUR CHAQUE APPEL -----------
 app.get('/scan', async (req, res) => {
   const mint = req.query.mint;
   if (!mint) return res.status(400).json({ error: "Missing token mint address" });
 
   let metadata = null, creator = null, tokensCreated = [], isHoneypot = null, socials = {}, topHolders = null, solscanHolders = null;
 
-  // Helius (metadata)
+  // Helius
   try { metadata = await getTokenMetadata(mint); } catch (e) { console.log('Helius error:', e.message); }
-  // Helius (creator & tokens créés)
   try { creator = await getCreatorWallet(mint); if (creator) tokensCreated = await getTokensCreatedBy(creator); } catch (e) { console.log('Creator error:', e.message); }
-  // Honeypot
   try { isHoneypot = await checkHoneypot(mint); } catch (e) { console.log('Honeypot error:', e.message); }
-  // Socials
   try { socials = metadata ? extractSocials(metadata) : {}; } catch (e) { console.log('Socials error:', e.message); }
-  // Birdeye
   try { topHolders = await getTopHoldersBirdeye(mint); } catch (e) { topHolders = null; }
-  // Solscan
   try { solscanHolders = await getTopHoldersSolscan(mint); } catch (e) { solscanHolders = null; }
 
-  // Champs utilitaires
   const name = metadata ? getField(metadata, [
     'name', 'offChainData.name', 'offChainData.metadata.name', 'onChainData.metadata.name'
   ]) : null;
