@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const cheerio = require('cheerio'); // <-- Nouveau pour scraper Nitter
+const cheerio = require('cheerio'); // <-- garder si tu veux le scraping Nitter
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -20,7 +20,6 @@ async function getTwitterFollowers(handle) {
     const followers = $('li:contains("Followers") .profile-stat-num').first().text().replace(/[^\d]/g, '');
     return followers ? parseInt(followers) : null;
   } catch (e) {
-    // Peut être "Not found" ou Nitter HS
     return null;
   }
 }
@@ -77,7 +76,6 @@ function extractSocials(metadata) {
   return socials;
 }
 
-// -------- AJOUTE CETTE FONCTION --------
 function getField(obj, paths) {
   for (let path of paths) {
     const value = path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : null), obj);
@@ -101,7 +99,7 @@ app.get('/scan', async (req, res) => {
     const isHoneypot = await checkHoneypot(mint);
     const socials = extractSocials(metadata);
 
-    // NEW: Engagement Twitter
+    // Engagement Twitter
     let twitterFollowers = null;
     let engagementBadge = "No Twitter";
     if (socials.twitter) {
@@ -112,7 +110,6 @@ app.get('/scan', async (req, res) => {
       else engagementBadge = "Strong";
     }
 
-    // Cherche dans toutes les sources possibles !
     const name = getField(metadata, [
       'name',
       'offChainData.name',
