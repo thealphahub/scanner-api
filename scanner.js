@@ -27,7 +27,7 @@ async function getCreatorWallet(mint) {
   });
   if (data && data.length > 0) {
     const firstTx = data[data.length - 1];
-    return firstTx.signers[0];
+    return firstTx.signers ? firstTx.signers[0] : null;
   }
   return null;
 }
@@ -35,7 +35,7 @@ async function getCreatorWallet(mint) {
 async function getTokensCreatedBy(wallet) {
   const url = `https://api.helius.xyz/v0/addresses/${wallet}/tokens?api-key=${HELIUS_API_KEY}`;
   const { data } = await axios.get(url);
-  return data.filter(t => t.mint_authority === wallet);
+  return Array.isArray(data) ? data.filter(t => t.mint_authority === wallet) : [];
 }
 
 async function checkHoneypot(mint) {
@@ -63,17 +63,16 @@ function extractSocials(metadata) {
   return socials;
 }
 
-// --- Utilitaire pour lire champs multiples
 function getField(obj, paths) {
   for (let path of paths) {
     const value = path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : null), obj);
-    if (value) return value;
+    if (value !== undefined && value !== null && value !== '') return value;
   }
   return null;
 }
 
-// --- Birdeye: top holders
 async function getTopHoldersBirdeye(mint) {
+  if (!BIRDEYE_API_KEY) return null;
   try {
     const url = `https://public-api.birdeye.so/v1/token/holder_list?address=${mint}&limit=10`;
     const { data } = await axios.get(url, {
@@ -81,7 +80,7 @@ async function getTopHoldersBirdeye(mint) {
         "X-API-KEY": BIRDEYE_API_KEY
       }
     });
-    return data?.data || null; // data.data contient la liste des holders
+    return data?.data || null;
   } catch (e) {
     console.log('Birdeye error:', e.response?.status, e.response?.data);
     return null;
@@ -95,6 +94,8 @@ app.get('/scan', async (req, res) => {
 
   try {
     const metadata = await getTokenMetadata(mint);
+    console.log(metadata); // Pour debug, retire-le si tout fonctionne !
+
     if (!metadata) return res.status(404).json({ error: "Token not found" });
 
     const creator = await getCreatorWallet(mint);
@@ -103,38 +104,37 @@ app.get('/scan', async (req, res) => {
     const isHoneypot = await checkHoneypot(mint);
     const socials = extractSocials(metadata);
 
-    // Multi-sources pour name, symbol, logo
+    // Fallback multi-sources
     const name = getField(metadata, [
       'name',
       'offChainData.name',
       'offChainData.metadata.name',
       'onChainData.metadata.name'
-    ]);
+    ]) ?? "-";
     const symbol = getField(metadata, [
       'symbol',
       'offChainData.symbol',
       'offChainData.metadata.symbol',
       'onChainData.metadata.symbol'
-    ]);
+    ]) ?? "-";
     const logo = getField(metadata, [
       'offChainData.image',
       'offChainData.logo',
       'offChainData.metadata.image',
       'offChainData.metadata.logo'
-    ]);
+    ]) || null;
 
-    // Birdeye holders
     const topHolders = await getTopHoldersBirdeye(mint);
 
     res.json({
-      name: name || null,
-      symbol: symbol || null,
-      logo: logo || null,
+      name,
+      symbol,
+      logo,
       creator: creator || null,
-      tokensCreated: tokensCreated.length,
+      tokensCreated: Array.isArray(tokensCreated) ? tokensCreated.length : 0,
       isHoneypot,
       socials,
-      topHolders // tableau des top holders (adresse, balance, etc.)
+      topHolders
     });
   } catch (e) {
     res.status(500).json({ error: "Server error", details: e.message });
