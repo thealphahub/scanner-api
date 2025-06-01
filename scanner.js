@@ -1,4 +1,4 @@
-require('dotenv').config(); 
+require('dotenv').config();  
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -62,7 +62,16 @@ function extractSocials(metadata) {
   return socials;
 }
 
-// ROUTE PRINCIPALE : /scan?mint=...
+// -------- AJOUTE CETTE FONCTION --------
+function getField(obj, paths) {
+  for (let path of paths) {
+    const value = path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : null), obj);
+    if (value) return value;
+  }
+  return null;
+}
+
+// -------- NOUVEAU BLOC POUR /scan --------
 app.get('/scan', async (req, res) => {
   const mint = req.query.mint;
   if (!mint) return res.status(400).json({ error: "Missing token mint address" });
@@ -77,11 +86,30 @@ app.get('/scan', async (req, res) => {
     const isHoneypot = await checkHoneypot(mint);
     const socials = extractSocials(metadata);
 
-    // Ajoute des fallback null pour name et symbol
+    // Cherche dans toutes les sources possibles !
+    const name = getField(metadata, [
+      'name',
+      'offChainData.name',
+      'offChainData.metadata.name',
+      'onChainData.metadata.name'
+    ]);
+    const symbol = getField(metadata, [
+      'symbol',
+      'offChainData.symbol',
+      'offChainData.metadata.symbol',
+      'onChainData.metadata.symbol'
+    ]);
+    const logo = getField(metadata, [
+      'offChainData.image',
+      'offChainData.logo',
+      'offChainData.metadata.image',
+      'offChainData.metadata.logo'
+    ]);
+
     res.json({
-      name: metadata?.name || null,
-      symbol: metadata?.symbol || null,
-      logo: metadata?.offChainData?.image || null,
+      name: name || null,
+      symbol: symbol || null,
+      logo: logo || null,
       creator: creator || null,
       tokensCreated: tokensCreated.length,
       isHoneypot,
