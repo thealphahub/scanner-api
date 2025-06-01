@@ -6,7 +6,6 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3001;
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
-const SOLSCAN_API_KEY = process.env.SOLSCAN_API_KEY;
 const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
 
 app.use(cors());
@@ -92,32 +91,7 @@ async function getTopHoldersBirdeye(mint) {
   }
 }
 
-// --- Solscan: top holders
-async function getTopHoldersSolscan(mint) {
-  if (!SOLSCAN_API_KEY) return null;
-  try {
-    const url = `https://api.solscan.io/v2.0/token/holders`;
-    const { data } = await axios.post(
-      url,
-      {
-        tokenAddress: mint,
-        offset: 0,
-        limit: 10
-      },
-      {
-        headers: {
-          'accept': 'application/json',
-          'Authorization': `Bearer ${SOLSCAN_API_KEY}`
-        }
-      }
-    );
-    return data?.data || null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// ----------- ROUTE PRINCIPALE, FULL FAIL-SAFE ET TIMEOUTS -----------
+// ----------- ROUTE PRINCIPALE SANS SOLSCAN -----------
 app.get('/scan', async (req, res) => {
   const mint = req.query.mint;
   if (!mint) return res.status(400).json({ error: "Missing token mint address" });
@@ -142,10 +116,7 @@ app.get('/scan', async (req, res) => {
   ]) : null;
 
   // Démarre les holders en //, timeout si >2sec
-  const birdeyePromise = promiseWithTimeout(getTopHoldersBirdeye(mint), 2000);
-  const solscanPromise = promiseWithTimeout(getTopHoldersSolscan(mint), 2000);
-
-  const [birdeyeTopHolders, solscanTopHolders] = await Promise.all([birdeyePromise, solscanPromise]);
+  const birdeyeTopHolders = await promiseWithTimeout(getTopHoldersBirdeye(mint), 2000);
 
   if (!metadata) return res.status(404).json({ error: "Token not found" });
 
@@ -157,8 +128,7 @@ app.get('/scan', async (req, res) => {
     tokensCreated: Array.isArray(tokensCreated) ? tokensCreated.length : 0,
     isHoneypot,
     socials,
-    birdeyeTopHolders: birdeyeTopHolders || [],
-    solscanTopHolders: solscanTopHolders || []
+    birdeyeTopHolders: birdeyeTopHolders || []
   });
 });
 
