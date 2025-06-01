@@ -72,6 +72,10 @@ function getField(obj, paths) {
   return null;
 }
 
+// --- Helpers pour timeout safe ---
+const promiseWithTimeout = (p, ms = 2000) =>
+  Promise.race([p, new Promise(resolve => setTimeout(() => resolve(null), ms))]);
+
 // --- Birdeye: top holders
 async function getTopHoldersBirdeye(mint) {
   if (!BIRDEYE_API_KEY) return null;
@@ -84,7 +88,6 @@ async function getTopHoldersBirdeye(mint) {
     });
     return data?.data || null;
   } catch (e) {
-    console.log('Birdeye error:', e.response?.status, e.response?.data);
     return null;
   }
 }
@@ -110,26 +113,24 @@ async function getTopHoldersSolscan(mint) {
     );
     return data?.data || null;
   } catch (e) {
-    console.log('Solscan error:', e.response?.status, e.response?.data);
     return null;
   }
 }
 
-// ----------- ROUTE PRINCIPALE AVEC FAIL-SAFE POUR CHAQUE APPEL -----------
+// ----------- ROUTE PRINCIPALE, FULL FAIL-SAFE ET TIMEOUTS -----------
 app.get('/scan', async (req, res) => {
   const mint = req.query.mint;
   if (!mint) return res.status(400).json({ error: "Missing token mint address" });
 
-  let metadata = null, creator = null, tokensCreated = [], isHoneypot = null, socials = {}, topHolders = null, solscanHolders = null;
+  let metadata = null, creator = null, tokensCreated = [], isHoneypot = null, socials = {};
 
-  // Helius
-  try { metadata = await getTokenMetadata(mint); } catch (e) { console.log('Helius error:', e.message); }
-  try { creator = await getCreatorWallet(mint); if (creator) tokensCreated = await getTokensCreatedBy(creator); } catch (e) { console.log('Creator error:', e.message); }
-  try { isHoneypot = await checkHoneypot(mint); } catch (e) { console.log('Honeypot error:', e.message); }
-  try { socials = metadata ? extractSocials(metadata) : {}; } catch (e) { console.log('Socials error:', e.message); }
-  try { topHolders = await getTopHoldersBirdeye(mint); } catch (e) { topHolders = null; }
-  try { solscanHolders = await getTopHoldersSolscan(mint); } catch (e) { solscanHolders = null; }
+  // Principales infos Helius (jamais bloquées)
+  try { metadata = await getTokenMetadata(mint); } catch {}
+  try { creator = await getCreatorWallet(mint); if (creator) tokensCreated = await getTokensCreatedBy(creator); } catch {}
+  try { isHoneypot = await checkHoneypot(mint); } catch {}
+  try { socials = metadata ? extractSocials(metadata) : {}; } catch {}
 
+  // Champs multi-sources
   const name = metadata ? getField(metadata, [
     'name', 'offChainData.name', 'offChainData.metadata.name', 'onChainData.metadata.name'
   ]) : null;
@@ -139,6 +140,12 @@ app.get('/scan', async (req, res) => {
   const logo = metadata ? getField(metadata, [
     'offChainData.image', 'offChainData.logo', 'offChainData.metadata.image', 'offChainData.metadata.logo'
   ]) : null;
+
+  // Démarre les holders en //, timeout si >2sec
+  const birdeyePromise = promiseWithTimeout(getTopHoldersBirdeye(mint), 2000);
+  const solscanPromise = promiseWithTimeout(getTopHoldersSolscan(mint), 2000);
+
+  const [birdeyeTopHolders, solscanTopHolders] = await Promise.all([birdeyePromise, solscanPromise]);
 
   if (!metadata) return res.status(404).json({ error: "Token not found" });
 
@@ -150,8 +157,8 @@ app.get('/scan', async (req, res) => {
     tokensCreated: Array.isArray(tokensCreated) ? tokensCreated.length : 0,
     isHoneypot,
     socials,
-    birdeyeTopHolders: topHolders,
-    solscanTopHolders: solscanHolders
+    birdeyeTopHolders: birdeyeTopHolders || [],
+    solscanTopHolders: solscanTopHolders || []
   });
 });
 
