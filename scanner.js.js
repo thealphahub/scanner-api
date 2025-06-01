@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config(); 
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -77,9 +77,10 @@ app.get('/scan', async (req, res) => {
     const isHoneypot = await checkHoneypot(mint);
     const socials = extractSocials(metadata);
 
+    // Ajoute des fallback null pour name et symbol
     res.json({
-      name: metadata.name,
-      symbol: metadata.symbol,
+      name: metadata?.name || null,
+      symbol: metadata?.symbol || null,
       logo: metadata?.offChainData?.image || null,
       creator: creator || null,
       tokensCreated: tokensCreated.length,
